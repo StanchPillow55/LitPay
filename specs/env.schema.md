@@ -1,0 +1,45 @@
+
+# Environment Schema
+
+```ini
+# Core
+NODE_ENV=production
+PORT=8080
+BASE_URL=https://litpay.example.com
+
+# Auth
+SESSION_SECRET=...
+JWT_SECRET=...
+
+# Storage
+OBJECT_STORE_BUCKET=litpay-uploads
+OBJECT_STORE_REGION=us-west-1
+
+# Database
+POSTGRES_URL=postgres://user:pass@host:5432/litpay
+POSTGRES_SSL=true
+
+# Vectors/Cache
+REDIS_URL=redis://host:6379
+EMBEDDINGS_TTL_DAYS=30
+
+# Claude / Anthropic
+ANTHROPIC_API_KEY=...
+
+# x402/CDP
+X402_BUYER_KEY=...
+CDP_WALLET_MNEMONIC=...
+CDP_CHAIN=evm
+
+# Stripe
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+METER_PRICE_ID=price_...
+
+# Policy
+POLICY_DAILY_BUDGET_CENTS=5000
+POLICY_SESSION_CAP_CENTS=1500
+POLICY_PER_CALL_MAX_CENTS=500
+POLICY_PROVIDER_X402_DAILY_CEILING_CENTS=3000
+RESERVATION_TTL_MINUTES=15
+```

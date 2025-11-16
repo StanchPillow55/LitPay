@@ -6,6 +6,10 @@
 .env.test
 .env.production
 
+# Wallet backups (contains private keys)
+seller-wallet-*.json
+buyer-wallet-*.json
+
 # macOS
 .DS_Store
 .AppleDouble

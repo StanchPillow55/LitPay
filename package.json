@@ -1,0 +1,27 @@
+{
+  "scripts": {
+    "start": "node server.js",
+    "verify": "node verify-env.js",
+    "validate:env": "node validate-env-example.js",
+    "migrate": "node migrate.js",
+    "seed": "node seed.js",
+    "test:policy": "node test-policy.js",
+    "test:x402": "node test-x402.js",
+    "test:concurrency": "node test-concurrency.js",
+    "test:api": "./test-api.sh",
+    "test:e2e": "./test-e2e.sh"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
+    "@coinbase/cdp-sdk": "^1.38.6",
+    "@coinbase/coinbase-sdk": "^0.25.0",
+    "axios": "^1.13.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "pg": "^8.16.3",
+    "stripe": "^19.3.1",
+    "viem": "^2.39.0"
+  }
+}

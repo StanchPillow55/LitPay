@@ -1,0 +1,296 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  env-example-validate:
+    name: Validate .env.example (no secrets, 100% keys)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Ensure required spec files exist before validation
+      - name: Ensure spec files exist
+        run: |
+          test -f specs/env.schema.md || { echo "❌ specs/env.schema.md not found"; exit 1; }
+          test -f .env.example || { echo "❌ .env.example not found"; exit 1; }
+
+      # Main validation - checks:
+      # 1) Every key in specs/env.schema.md exists in .env.example
+      # 2) No values resemble real secrets (sk_live_, whsec_, sk-ant-, AKIA, 0x..., etc.)
+      # 3) All keys have documentation (comment within 5 lines)
+      - name: Validate .env.example
+        run: npm run validate:env
+
+      # Save validation logs as artifact for PR review
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: env-validation-logs
+          path: |
+            validate-env-*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  security-checks:
+    name: Security & Secret Detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comprehensive scanning
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Check for secrets in committed files using git log
+      - name: Scan commit history for secrets
+        run: |
+          echo "🔍 Scanning recent commits for potential secrets..."
+          
+          # Define secret patterns
+          PATTERNS=(
+            'sk_(live|test)_[a-zA-Z0-9]{24,}'
+            'whsec_[a-zA-Z0-9]{32,}'
+            'pk_(live|test)_[a-zA-Z0-9]{24,}'
+            'sk-ant-[A-Za-z0-9_-]{32,}'
+            'AKIA[0-9A-Z]{16}'
+            '0x[a-fA-F0-9]{64}'
+          )
+          
+          FOUND=0
+          for pattern in "${PATTERNS[@]}"; do
+            if git log -p -10 | grep -E "$pattern" | grep -v "example\|placeholder\|<YOUR_" > /dev/null 2>&1; then
+              echo "⚠️  Pattern detected: $pattern"
+              FOUND=1
+            fi
+          done
+          
+          if [ $FOUND -eq 1 ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ Potential secrets found in commit history"
+            echo "Review recent commits and remove any exposed secrets"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          else
+            echo "✅ No secrets detected in recent commits"
+          fi
+
+      # Verify pre-commit hook is properly configured
+      - name: Check pre-commit hook exists
+        run: |
+          if [ -f .git/hooks/pre-commit ] && [ -x .git/hooks/pre-commit ]; then
+            echo "✅ Pre-commit hook is installed and executable"
+          else
+            echo "⚠️  Pre-commit hook not found or not executable"
+            echo "Run: chmod +x .git/hooks/pre-commit"
+            exit 1
+          fi
+
+  database-seed-test:
+    name: Test Database Seed Script
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: litpay_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup test environment
+        run: |
+          cp .env.example .env
+          echo "POSTGRES_URL=postgresql://test_user:test_password@localhost:5432/litpay_test" >> .env
+          echo "NODE_ENV=test" >> .env
+
+      - name: Run migrations
+        run: npm run migrate
+
+      - name: Test seed script (must complete in ≤5s)
+        run: |
+          echo "Testing seed script performance..."
+          start_time=$(date +%s.%N)
+          npm run seed
+          end_time=$(date +%s.%N)
+          runtime=$(echo "$end_time - $start_time" | bc)
+          
+          echo "Seed runtime: ${runtime}s"
+          
+          # Check if runtime exceeds 5 seconds (METRICS.md requirement)
+          if (( $(echo "$runtime > 5.0" | bc -l) )); then
+            echo "❌ Seed script took ${runtime}s (exceeds 5s requirement)"
+            exit 1
+          else
+            echo "✅ Seed script passed (${runtime}s < 5s)"
+          fi
+
+      - name: Verify seed data
+        run: |
+          # This would query the database to verify seed data
+          # For now, we trust the seed script's exit code
+          echo "✅ Seed data verification would go here"
+
+  lint-and-format:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Check for common issues in JavaScript files
+      - name: Basic lint check
+        run: |
+          echo "🔍 Checking for common code issues..."
+          
+          # Check for console.log in production code (excluding test files)
+          if find . -name "*.js" -not -path "*/node_modules/*" -not -path "*/test*" -exec grep -l "console.log" {} \; | grep -v "scripts/" | grep .; then
+            echo "⚠️  Found console.log statements in production code"
+          else
+            echo "✅ No console.log in production code"
+          fi
+          
+          # Check for TODO/FIXME comments
+          TODO_COUNT=$(find . -name "*.js" -not -path "*/node_modules/*" -exec grep -c "TODO\|FIXME" {} \; | awk '{s+=$1} END {print s}')
+          echo "📝 Found $TODO_COUNT TODO/FIXME comments"
+
+      # Validate JSON files
+      - name: Validate JSON files
+        run: |
+          echo "Validating JSON files..."
+          node -e "JSON.parse(require('fs').readFileSync('package.json'))" && echo "✅ package.json valid"
+          
+          # Validate any other JSON files in the repo
+          find . -name "*.json" -not -path "*/node_modules/*" -exec node -e "try { JSON.parse(require('fs').readFileSync('{}', 'utf8')); console.log('✅ {} valid'); } catch(e) { console.error('❌ {} invalid:', e.message); process.exit(1); }" \;
+
+  metrics-check:
+    name: Verify METRICS.md Alignment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check required files exist
+        run: |
+          echo "Checking METRICS.md requirements..."
+          
+          REQUIRED_FILES=(
+            "METRICS.md"
+            "IMPLEMENTATION_PLAN.md"
+            "FRONTEND_ARCHITECTURE.md"
+            "DEMO.md"
+            ".env.example"
+            "specs/env.schema.md"
+          )
+          
+          MISSING=0
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ $file"
+            else
+              echo "❌ $file missing"
+              MISSING=1
+            fi
+          done
+          
+          if [ $MISSING -eq 1 ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ Required documentation missing"
+            exit 1
+          fi
+          
+          echo "✅ All required documentation present"
+
+      - name: Validate METRICS.md structure
+        run: |
+          if grep -q "Overall Progress Summary" METRICS.md; then
+            echo "✅ METRICS.md has progress summary"
+          else
+            echo "❌ METRICS.md missing progress summary"
+            exit 1
+          fi
+
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [env-example-validate, security-checks, database-seed-test, lint-and-format, metrics-check]
+    if: always()
+
+    steps:
+      - name: Check job statuses
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "CI Pipeline Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "env-example-validate: ${{ needs.env-example-validate.result }}"
+          echo "security-checks: ${{ needs.security-checks.result }}"
+          echo "database-seed-test: ${{ needs.database-seed-test.result }}"
+          echo "lint-and-format: ${{ needs.lint-and-format.result }}"
+          echo "metrics-check: ${{ needs.metrics-check.result }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          if [[ "${{ needs.env-example-validate.result }}" != "success" ]] || \
+             [[ "${{ needs.security-checks.result }}" != "success" ]] || \
+             [[ "${{ needs.database-seed-test.result }}" != "success" ]] || \
+             [[ "${{ needs.lint-and-format.result }}" != "success" ]] || \
+             [[ "${{ needs.metrics-check.result }}" != "success" ]]; then
+            echo "❌ CI Pipeline Failed"
+            exit 1
+          else
+            echo "✅ CI Pipeline Passed"
+          fi
